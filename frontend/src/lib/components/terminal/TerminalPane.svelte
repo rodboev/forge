@@ -4,6 +4,7 @@
   interface TerminalPaneProps {
     workspaceId?: string | undefined;
     websocketPath?: string | undefined;
+    fleetHostKey?: string | undefined;
     reconnectOnExit?: boolean | undefined;
     active?: boolean | undefined;
     renderingEnabled?: boolean | undefined;
@@ -21,6 +22,7 @@
   let {
     workspaceId = undefined,
     websocketPath = undefined,
+    fleetHostKey = undefined,
     reconnectOnExit = undefined,
     active = undefined,
     renderingEnabled = undefined,
@@ -51,6 +53,7 @@
   bind:this={xtermPane}
   {workspaceId}
   {websocketPath}
+  {fleetHostKey}
   {reconnectOnExit}
   {active}
   {renderingEnabled}

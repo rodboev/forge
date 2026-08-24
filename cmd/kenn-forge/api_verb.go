@@ -45,6 +45,7 @@ func (e *apiVerbError) Error() string { return e.err.Error() }
 type apiVerbOptions struct {
 	configPath    string
 	data          string
+	contentType   string
 	timeout       time.Duration
 	includeStatus bool
 }
@@ -83,6 +84,12 @@ func newAPIVerbCommand(
 	})
 	cmd.Flags().StringVar(&opts.configPath, "config", config.DefaultConfigPath(), "path to config file")
 	cmd.Flags().StringVarP(&opts.data, "data", "d", "", "request body; use @- to read the body from stdin")
+	cmd.Flags().StringVar(
+		&opts.contentType,
+		"content-type",
+		"",
+		"request Content-Type (defaults to application/json for mutations)",
+	)
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", 60*time.Second, "request timeout")
 	cmd.Flags().BoolVarP(
 		&opts.includeStatus,
@@ -95,7 +102,7 @@ func newAPIVerbCommand(
 }
 
 func rejectRelayFlagsInControlMode(cmd *cobra.Command) error {
-	for _, name := range []string{"config", "data", "include", "timeout"} {
+	for _, name := range []string{"config", "content-type", "data", "include", "timeout"} {
 		if cmd.Flags().Changed(name) {
 			return &apiVerbError{
 				code: apiVerbExitNoRequest,
@@ -140,11 +147,15 @@ func runAPIVerb(method, requestPath string, opts apiVerbOptions, stdout io.Write
 		return &apiVerbError{apiVerbExitNoRequest,
 			fmt.Errorf("build request: %w", err)}
 	}
-	// The server's CSRF guard requires application/json on every
-	// mutation, including zero-body endpoints (e.g. POST /sync), so
-	// the content type is keyed off the method, not body presence.
-	if body != nil || (method != http.MethodGet && method != http.MethodHead) {
-		req.Header.Set("Content-Type", "application/json")
+	// JSON is the default for mutations, including zero-body endpoints such as
+	// POST /sync. Binary relay callers select their documented media type with
+	// --content-type.
+	contentType := opts.contentType
+	if contentType == "" && (body != nil || (method != http.MethodGet && method != http.MethodHead)) {
+		contentType = "application/json"
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	resp, err := daemon.Client.Do(req)
 	if err != nil {

@@ -215,6 +215,7 @@
   <TerminalPane
     bind:this={terminalPane}
     websocketPath={session.websocketPath}
+    fleetHostKey={session.fleetHostKey}
     reconnectOnExit={false}
     disabled={session.disabled ?? false}
     active={active && attached}

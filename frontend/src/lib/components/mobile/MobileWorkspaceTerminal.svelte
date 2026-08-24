@@ -192,6 +192,7 @@
       const pooledKey = pooledHostKey(session);
       noteSessionMounted({
         hostKey: pooledKey,
+        ...(hostKey === undefined ? {} : { fleetHostKey: hostKey }),
         websocketPath: session.websocketPath,
         status: session.status,
         cursorWheelInput: session.cursorWheelInput,

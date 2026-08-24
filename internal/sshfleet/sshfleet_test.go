@@ -80,7 +80,7 @@ func TestRunnerRelayFramesStatusAndBody(t *testing.T) {
 	resp, err := runner.Relay(
 		context.Background(),
 		testConnection(), "kenn-forge",
-		"POST", "/api/v1/projects/prj_1/worktrees",
+		"POST", "/api/v1/projects/prj_1/worktrees", "application/json",
 		[]byte(`{"branch":"feat"}`),
 	)
 	require.NoError(err)
@@ -95,6 +95,8 @@ func TestRunnerRelayFramesStatusAndBody(t *testing.T) {
 	assert.Contains(joined, "wes@studio.local")
 	assert.Contains(joined, "kenn-forge")
 	assert.Contains(joined, "api")
+	assert.Contains(joined, "--content-type")
+	assert.Contains(joined, "application/json")
 	assert.Contains(joined, "PATH=")
 	assert.Equal("studio", mgr.lastIdentity)
 	assert.Equal(openssh.Generation(7), mgr.lastGeneration)
@@ -110,7 +112,7 @@ func TestRunnerRelayFramesStatusAndBody(t *testing.T) {
 	resp, err = runner.Relay(
 		context.Background(),
 		testConnection(), "kenn-forge",
-		"GET", "/api/v1/projects/prj_missing", nil,
+		"GET", "/api/v1/projects/prj_missing", "", nil,
 	)
 	require.NoError(err)
 	assert.Equal(404, resp.Status)
@@ -126,7 +128,7 @@ func TestRunnerRelayFramesStatusAndBody(t *testing.T) {
 	_, err = runner.Relay(
 		context.Background(),
 		testConnection(), "kenn-forge",
-		"GET", "/api/v1/snapshot/raw", nil,
+		"GET", "/api/v1/snapshot/raw", "", nil,
 	)
 	require.Error(err)
 	assert.Contains(err.Error(), "remote daemon unavailable")
@@ -147,7 +149,7 @@ func TestRelayNoRequestErrorIsTyped(t *testing.T) {
 	_, err := runner.Relay(
 		context.Background(),
 		testConnection(), "kenn-forge",
-		"GET", "/api/v1/snapshot/raw", nil,
+		"GET", "/api/v1/snapshot/raw", "", nil,
 	)
 	require.ErrorIs(t, err, ErrRemoteDaemonUnavailable)
 }

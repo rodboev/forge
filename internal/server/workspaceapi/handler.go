@@ -14,6 +14,7 @@ import (
 	ghclient "go.kenn.io/forge/internal/github"
 	"go.kenn.io/forge/internal/server/httpapi"
 	"go.kenn.io/forge/internal/systemclipboard"
+	"go.kenn.io/forge/internal/terminalpaste"
 	"go.kenn.io/forge/internal/workspace"
 	"go.kenn.io/forge/internal/workspace/localruntime"
 )
@@ -74,20 +75,21 @@ type workspaceDiffEventData struct {
 // the root server package while preserving the shared shutdown and event
 // ordering owned by the composition root.
 type Deps struct {
-	DB                 *db.DB
-	Resolver           *httpapi.RepositoryResolver
-	Syncer             *ghclient.Syncer
-	Config             ConfigSnapshot
-	Workspaces         *workspace.Manager
-	Runtime            *localruntime.Manager
-	TerminalClipboard  systemclipboard.Writer
-	AgentActivity      *agentactivity.Store
-	TmuxCommand        []string
-	Now                func() time.Time
-	EnrichmentDisabled bool
-	Broadcast          func(Event) uint64
-	Subscribe          func(context.Context, bool) (<-chan RecordedEvent, <-chan struct{})
-	Generation         func() uint64
+	DB                  *db.DB
+	Resolver            *httpapi.RepositoryResolver
+	Syncer              *ghclient.Syncer
+	Config              ConfigSnapshot
+	Workspaces          *workspace.Manager
+	Runtime             *localruntime.Manager
+	TerminalClipboard   systemclipboard.Writer
+	TerminalPasteImages *terminalpaste.Store
+	AgentActivity       *agentactivity.Store
+	TmuxCommand         []string
+	Now                 func() time.Time
+	EnrichmentDisabled  bool
+	Broadcast           func(Event) uint64
+	Subscribe           func(context.Context, bool) (<-chan RecordedEvent, <-chan struct{})
+	Generation          func() uint64
 
 	RecomputeWorktreeLinks  func(context.Context)
 	RefreshWorktreeStats    func(context.Context, string, string) error
@@ -109,6 +111,7 @@ type Handler struct {
 	workspaces    *workspace.Manager
 	runtime       *localruntime.Manager
 	clipboard     systemclipboard.Writer
+	pasteImages   *terminalpaste.Store
 	agentActivity *agentactivity.Store
 	tmuxCmd       []string
 	now           func() time.Time
@@ -173,6 +176,7 @@ func New(deps Deps) *Handler {
 		workspaces:                     deps.Workspaces,
 		runtime:                        deps.Runtime,
 		clipboard:                      deps.TerminalClipboard,
+		pasteImages:                    deps.TerminalPasteImages,
 		agentActivity:                  deps.AgentActivity,
 		tmuxCmd:                        slices.Clone(deps.TmuxCommand),
 		now:                            now,
@@ -245,6 +249,7 @@ func (h *Handler) enqueueDetailSyncWithCompletion(
 // Register registers workspace and local-project REST operations.
 func (s *Handler) Register(api huma.API) {
 	s.registerTerminalClipboard(api)
+	s.registerTerminalPasteImage(api)
 	huma.Register(api, huma.Operation{
 		OperationID: "receive-agent-hook",
 		Method:      http.MethodPost,

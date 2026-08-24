@@ -30,6 +30,7 @@ func TestSnapshotRoutesRegistered(t *testing.T) {
 		"/snapshot",
 		"/snapshot/raw",
 		"/fleet/hosts/{host_key}/workspaces",
+		"/fleet/hosts/{host_key}/terminal/paste-image",
 		"/fleet/hosts/{host_key}/issues/{provider}/{owner}/{name}/{number}/workspace",
 		"/fleet/hosts/{host_key}/host/{platform_host}/issues/{provider}/{owner}/{name}/{number}/workspace",
 		"/fleet/hosts/{host_key}/workspaces/{id}/runtime/sessions",
@@ -59,6 +60,14 @@ func TestSnapshotRoutesRegistered(t *testing.T) {
 	require.NotNil(spec.Paths["/snapshot"].Get, "GET /snapshot not registered")
 	require.NotNil(spec.Paths["/snapshot/raw"].Get, "GET /snapshot/raw not registered")
 	require.NotNil(spec.Paths["/fleet/hosts/{host_key}/workspaces"].Post, "POST fleet workspaces not registered")
+	pasteImage := spec.Paths["/fleet/hosts/{host_key}/terminal/paste-image"]
+	require.NotNil(pasteImage.Post, "POST fleet terminal paste image not registered")
+	require.NotNil(pasteImage.Post.RequestBody)
+	require.NotNil(pasteImage.Post.RequestBody.Content["application/octet-stream"])
+	assert.Equal(
+		"binary",
+		pasteImage.Post.RequestBody.Content["application/octet-stream"].Schema.Format,
+	)
 	require.NotNil(spec.Paths["/fleet/hosts/{host_key}/issues/{provider}/{owner}/{name}/{number}/workspace"].Post, "POST fleet issue workspace not registered")
 	require.NotNil(spec.Paths["/fleet/hosts/{host_key}/host/{platform_host}/issues/{provider}/{owner}/{name}/{number}/workspace"].Post, "POST fleet host issue workspace not registered")
 	require.NotNil(spec.Paths["/fleet/hosts/{host_key}/workspaces/{id}/runtime/sessions"].Post, "POST fleet session not registered")

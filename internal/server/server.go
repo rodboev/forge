@@ -45,6 +45,7 @@ import (
 	"go.kenn.io/forge/internal/server/workspaceapi"
 	"go.kenn.io/forge/internal/systemclipboard"
 	"go.kenn.io/forge/internal/telemetry"
+	"go.kenn.io/forge/internal/terminalpaste"
 	"go.kenn.io/forge/internal/tokenauth"
 	"go.kenn.io/forge/internal/workspace"
 	"go.kenn.io/forge/internal/workspace/localruntime"
@@ -778,6 +779,18 @@ func newServer(
 	if cfg != nil {
 		markdownImageDataDir = cfg.DataDir
 	}
+	var terminalPasteImages *terminalpaste.Store
+	if markdownImageDataDir != "" {
+		var err error
+		terminalPasteImages, err = terminalpaste.NewStore(filepath.Join(
+			markdownImageDataDir,
+			"cache",
+			"terminal-paste-images",
+		))
+		if err != nil {
+			slog.Warn("initialize terminal paste image cache", "err", err)
+		}
+	}
 	repoResolver := httpapi.NewRepositoryResolver(httpapi.RepositoryResolverDeps{
 		DB: database,
 		ProviderCapabilities: func(kind platform.Kind, host string) (platform.Capabilities, error) {
@@ -994,13 +1007,14 @@ func newServer(
 		})
 	}
 	s.workspaceAPI = workspaceapi.New(workspaceapi.Deps{
-		DB:                database,
-		Resolver:          repoResolver,
-		Syncer:            syncer,
-		Config:            workspaceConfigSnapshot(cfg, tmuxCmd),
-		Workspaces:        s.workspaces,
-		Runtime:           s.runtime,
-		TerminalClipboard: terminalClipboard,
+		DB:                  database,
+		Resolver:            repoResolver,
+		Syncer:              syncer,
+		Config:              workspaceConfigSnapshot(cfg, tmuxCmd),
+		Workspaces:          s.workspaces,
+		Runtime:             s.runtime,
+		TerminalClipboard:   terminalClipboard,
+		TerminalPasteImages: terminalPasteImages,
 		AgentActivity: agentactivity.NewStore(filepath.Join(
 			filepath.Dir(options.WorktreeDir), "agent-activity",
 		)),
@@ -1378,7 +1392,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if r.Method != http.MethodGet && s.isMutatingAPIRequest(r) {
-		if !checkCSRF(w, r, false) {
+		if !checkCSRF(w, r, s.isTerminalPasteImageAPIRequest(r)) {
 			return
 		}
 		if s.isMutatingDocsAPIRequest(r) && !isLoopbackRemoteAddr(r.RemoteAddr) {
@@ -1478,6 +1492,23 @@ func (s *Server) isTerminalClipboardAPIRequest(r *http.Request) bool {
 	return path == "/api/v1/terminal/clipboard"
 }
 
+func (s *Server) isTerminalPasteImageAPIRequest(r *http.Request) bool {
+	path := r.URL.Path
+	if s.basePath != "/" {
+		prefix := strings.TrimSuffix(s.basePath, "/")
+		path = strings.TrimPrefix(path, prefix)
+	}
+	if path == "/api/v1/terminal/paste-image" {
+		return true
+	}
+	fleetPath, ok := strings.CutPrefix(path, "/api/v1/fleet/hosts/")
+	if !ok {
+		return false
+	}
+	hostKey, target, ok := strings.Cut(fleetPath, "/")
+	return ok && hostKey != "" && target == "terminal/paste-image"
+}
+
 func (s *Server) isDocsBrowseAPIRequest(r *http.Request) bool {
 	path := r.URL.Path
 	if s.basePath != "/" {
@@ -1531,7 +1562,7 @@ func authorityIsLoopbackHost(hostHeader string) bool {
 
 // checkCSRF rejects cross-site mutation requests. Returns true if
 // the request is allowed, false if it was rejected (response written).
-func checkCSRF(w http.ResponseWriter, r *http.Request, allowProxyContentType bool) bool {
+func checkCSRF(w http.ResponseWriter, r *http.Request, allowNonJSONContentType bool) bool {
 	if sfs := r.Header.Get("Sec-Fetch-Site"); sfs != "" {
 		if sfs != "same-origin" && sfs != "none" {
 			writeError(w, http.StatusForbidden,
@@ -1540,13 +1571,14 @@ func checkCSRF(w http.ResponseWriter, r *http.Request, allowProxyContentType boo
 		}
 	}
 
-	// Require Content-Type: application/json on all mutation requests,
-	// including zero-body endpoints like POST /sync. This prevents
-	// cross-origin form submissions and simple fetches from forging
-	// requests even without Sec-Fetch-Site.
+	// Require Content-Type: application/json on mutation requests unless an
+	// explicitly registered binary endpoint receives its one documented media
+	// type. application/octet-stream is not a CORS-safelisted request content
+	// type, so cross-origin browsers must preflight it; forms and simple fetches
+	// still cannot reach the binary handler when Sec-Fetch-Site is absent.
 	ct := r.Header.Get("Content-Type")
 	if !strings.HasPrefix(ct, "application/json") {
-		if allowProxyContentType && r.Header.Get("Sec-Fetch-Site") != "" {
+		if allowNonJSONContentType && strings.HasPrefix(ct, "application/octet-stream") {
 			return true
 		}
 		writeError(w, http.StatusUnsupportedMediaType,

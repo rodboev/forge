@@ -827,6 +827,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/fleet/hosts/{host_key}/terminal/paste-image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Store a browser clipboard image on a fleet host */
+        post: operations["store-fleet-terminal-paste-image"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/fleet/hosts/{host_key}/workspaces": {
         parameters: {
             query?: never;
@@ -4241,6 +4258,23 @@ export interface paths {
         put?: never;
         /** Capture telemetry event */
         post: operations["capture-telemetry-event"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/terminal/paste-image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Store a browser clipboard image for terminal paste */
+        post: operations["store-terminal-paste-image"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8012,6 +8046,16 @@ export interface components {
             /** Format: int64 */
             scrollback: number;
         };
+        TerminalPasteImageOutputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/v1/schemas/TerminalPasteImageOutputBody.json
+             */
+            readonly $schema?: string;
+            /** @description Absolute path to the cached image on the terminal host */
+            path: string;
+        };
         TmuxSessionInfo: {
             createdAt?: string;
             managed: boolean;
@@ -10125,6 +10169,36 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Response returned by the owning fleet host. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "application/problem+json": components["schemas"]["ProblemError"];
+                };
+            };
+        };
+    };
+    "store-fleet-terminal-paste-image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                host_key: string;
+            };
+            cookie?: never;
+        };
+        /** @description Browser clipboard image forwarded to the owning host. */
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
         responses: {
             /** @description Response returned by the owning fleet host. */
             default: {
@@ -18170,6 +18244,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TelemetryEventResponse"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemError"];
+                };
+            };
+        };
+    };
+    "store-terminal-paste-image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalPasteImageOutputBody"];
                 };
             };
             /** @description Error */

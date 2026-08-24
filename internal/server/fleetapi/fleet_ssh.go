@@ -225,7 +225,7 @@ func (t *sshFleetTransport) clearMasterlessState(hostKey string) {
 func (t *sshFleetTransport) relay(
 	ctx context.Context,
 	peer config.FleetSSHPeer,
-	method, path string,
+	method, path, contentType string,
 	body []byte,
 ) (sshRelayResult, error) {
 	if t.initErr != nil {
@@ -265,7 +265,7 @@ func (t *sshFleetTransport) relay(
 	remoteCommand := peer.RemoteCommandOrDefault()
 	resp, err := t.runner.Relay(
 		ctx, connection, remoteCommand,
-		method, path, body,
+		method, path, contentType, body,
 	)
 	if !errors.Is(err, sshfleet.ErrRemoteDaemonUnavailable) {
 		finishMasterless(err)
@@ -282,7 +282,7 @@ func (t *sshFleetTransport) relay(
 	}
 	resp, err = t.runner.Relay(
 		ctx, connection, remoteCommand,
-		method, path, body,
+		method, path, contentType, body,
 	)
 	finishMasterless(err)
 	return sshRelayResult{response: resp, connection: connection}, err
@@ -401,7 +401,7 @@ func (s *Handler) fetchSSHPeerRaw(
 		PreferredTransport: "ssh",
 	}
 	result, err := t.relay(
-		ctx, p, http.MethodGet, "/api/v1/snapshot/raw", nil,
+		ctx, p, http.MethodGet, "/api/v1/snapshot/raw", "", nil,
 	)
 	if err != nil {
 		res.Err = errPtr(err)
@@ -461,7 +461,10 @@ func (s *Handler) serveSSHFleetRESTProxy(
 	if r.URL.RawQuery != "" {
 		path += "?" + r.URL.RawQuery
 	}
-	result, err := t.relay(r.Context(), peer, r.Method, path, body)
+	result, err := t.relay(
+		r.Context(), peer, r.Method, path,
+		r.Header.Get("Content-Type"), body,
+	)
 	if err != nil {
 		writeProblemResponse(w, httpapi.NewProblem(
 			http.StatusBadGateway,

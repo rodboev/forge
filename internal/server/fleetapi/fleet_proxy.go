@@ -25,19 +25,22 @@ import (
 	"go.kenn.io/forge/internal/procutil"
 	"go.kenn.io/forge/internal/server/httpapi"
 	"go.kenn.io/forge/internal/server/workspaceapi"
+	"go.kenn.io/forge/internal/terminalpaste"
 	"go.kenn.io/forge/internal/terminalwebsocket"
 	"go.kenn.io/forge/internal/tracing"
 )
 
 type fleetRESTProxyRoute struct {
-	operationID string
-	method      string
-	path        string
-	summary     string
-	pathParams  []string
-	queryParams []*huma.Param
-	body        bool
-	targetPath  func(*http.Request) string
+	operationID  string
+	method       string
+	path         string
+	summary      string
+	pathParams   []string
+	queryParams  []*huma.Param
+	body         bool
+	binaryBody   bool
+	maxBodyBytes int64
+	targetPath   func(*http.Request) string
 }
 
 type fleetHostTarget struct {
@@ -48,6 +51,18 @@ type fleetHostTarget struct {
 
 func (s *Handler) registerFleetOperationRoutes(api huma.API) {
 	routes := []fleetRESTProxyRoute{
+		{
+			operationID:  "store-fleet-terminal-paste-image",
+			method:       http.MethodPost,
+			path:         "/fleet/hosts/{host_key}/terminal/paste-image",
+			summary:      "Store a browser clipboard image on a fleet host",
+			pathParams:   []string{"host_key"},
+			binaryBody:   true,
+			maxBodyBytes: terminalpaste.MaxImageBytes,
+			targetPath: func(*http.Request) string {
+				return "/api/v1/terminal/paste-image"
+			},
+		},
 		{
 			operationID: "list-fleet-workspaces",
 			method:      http.MethodGet,
@@ -539,6 +554,10 @@ func (s *Handler) registerFleetOperationRoutes(api huma.API) {
 	}
 
 	for _, route := range routes {
+		maxBodyBytes := route.maxBodyBytes
+		if maxBodyBytes == 0 {
+			maxBodyBytes = -1
+		}
 		op := &huma.Operation{
 			OperationID:  route.operationID,
 			Method:       route.method,
@@ -547,9 +566,11 @@ func (s *Handler) registerFleetOperationRoutes(api huma.API) {
 			Tags:         []string{"Fleet"},
 			Parameters:   fleetProxyParams(route.pathParams, route.queryParams...),
 			Responses:    fleetProxyResponses(),
-			MaxBodyBytes: -1,
+			MaxBodyBytes: maxBodyBytes,
 		}
-		if route.body {
+		if route.binaryBody {
+			op.RequestBody = fleetProxyBinaryRequestBody()
+		} else if route.body {
 			op.RequestBody = fleetProxyRequestBody()
 		}
 		api.OpenAPI().AddOperation(op)
@@ -681,6 +702,18 @@ func fleetProxyRequestBody() *huma.RequestBody {
 					Type:                 "object",
 					AdditionalProperties: true,
 				},
+			},
+		},
+	}
+}
+
+func fleetProxyBinaryRequestBody() *huma.RequestBody {
+	return &huma.RequestBody{
+		Description: "Browser clipboard image forwarded to the owning host.",
+		Required:    true,
+		Content: map[string]*huma.MediaType{
+			"application/octet-stream": {
+				Schema: &huma.Schema{Type: "string", Format: "binary"},
 			},
 		},
 	}
@@ -892,7 +925,7 @@ func (s *Handler) serveSSHFleetWebSocketTerminal(
 	}
 
 	result, err := s.sshFleet.relay(
-		r.Context(), peer, http.MethodGet, attachSpecPath, nil,
+		r.Context(), peer, http.MethodGet, attachSpecPath, "", nil,
 	)
 	if err != nil {
 		attachSpan.SetAttributes(attribute.Bool("error", true))

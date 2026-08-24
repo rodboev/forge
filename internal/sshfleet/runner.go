@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -84,11 +85,12 @@ func NewRunnerWithExec(
 
 // Relay performs METHOD path with body against hostKey's remote
 // daemon via its CLI. remoteCommand is the peer's configured CLI
-// invocation (default "kenn-forge"); it may carry flags and is
-// embedded as a shell fragment.
+// invocation (default "kenn-forge"); it may carry flags and is embedded as a
+// shell fragment. contentType is forwarded explicitly because binary Fleet
+// routes cannot use the remote api verb's JSON default.
 func (r *Runner) Relay(
 	ctx context.Context, connection Connection, remoteCommand string,
-	method, path string,
+	method, path, contentType string,
 	body []byte,
 ) (Response, error) {
 	verbArgs := []string{"api", "-i", method, path}
@@ -96,6 +98,14 @@ func (r *Runner) Relay(
 	if len(body) > 0 {
 		verbArgs = []string{"api", "-i", "-d", "@-", method, path}
 		stdin = body
+	}
+	if contentType != "" {
+		verbArgs = slices.Insert(
+			verbArgs,
+			len(verbArgs)-2,
+			"--content-type",
+			contentType,
+		)
 	}
 
 	argv, err := r.sshArgv(connection, remoteCommand, verbArgs)

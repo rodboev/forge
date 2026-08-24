@@ -1,7 +1,9 @@
 package fleetapi
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +16,52 @@ import (
 
 	"go.kenn.io/forge/internal/config"
 )
+
+func TestFleetTerminalPasteImageProxyStreamsBinaryBody(t *testing.T) {
+	require := require.New(t)
+	assert := assert.New(t)
+	imageBytes := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{0x42}, 1024)...)
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(http.MethodPost, r.Method)
+		assert.Equal("/api/v1/terminal/paste-image", r.URL.Path)
+		assert.Equal("application/octet-stream", r.Header.Get("Content-Type"))
+		got, err := io.ReadAll(r.Body)
+		if !assert.NoError(err) {
+			http.Error(w, "read request body", http.StatusInternalServerError)
+			return
+		}
+		assert.Equal(imageBytes, got)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"path":"/var/lib/forge/paste-image.png"}`))
+	}))
+	t.Cleanup(peer.Close)
+
+	srv, _ := setupTestServer(t)
+	setTestFleetConfig(srv, func(cfg *config.Config) {
+		cfg.Fleet.Enabled = true
+		cfg.Fleet.Peers = []config.FleetPeer{{Key: "member", BaseURL: peer.URL}}
+	})
+	hub := httptest.NewServer(srv.localHandler())
+	t.Cleanup(hub.Close)
+	req, err := http.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		hub.URL+"/api/v1/fleet/hosts/member/terminal/paste-image",
+		bytes.NewReader(imageBytes),
+	)
+	require.NoError(err)
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	resp, err := hub.Client().Do(req)
+	require.NoError(err)
+	defer resp.Body.Close()
+
+	assert.Equal(http.StatusCreated, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(err)
+	assert.JSONEq(`{"path":"/var/lib/forge/paste-image.png"}`, string(body))
+}
 
 func TestFleetWebSocketProxyNegotiatesContextTakeoverOnBothLegs(t *testing.T) {
 	require := require.New(t)

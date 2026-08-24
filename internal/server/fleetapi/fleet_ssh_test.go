@@ -1,6 +1,7 @@
 package fleetapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,7 @@ import (
 	"go.kenn.io/forge/internal/fleet"
 	"go.kenn.io/forge/internal/server/workspaceapi"
 	"go.kenn.io/forge/internal/sshfleet"
+	"go.kenn.io/forge/internal/terminalpaste"
 	"go.kenn.io/kit/openssh"
 )
 
@@ -36,9 +38,10 @@ import (
 // (method+path plus stdin body) and answered from the routes map by
 // "METHOD path" key.
 type fakeSSHExec struct {
-	calls  []string
-	bodies [][]byte
-	routes map[string]string // "METHOD /path" -> framed output
+	calls     []string
+	bodies    [][]byte
+	fragments []string
+	routes    map[string]string // "METHOD /path" -> framed output
 }
 
 const testSSHControlPath = "/tmp/forge-test-control.sock"
@@ -88,6 +91,7 @@ func TestSSHFleetRelayFallsBackToMasterlessSSH(t *testing.T) {
 		config.FleetSSHPeer{Key: "build", Destination: "maintainer@build.example"},
 		http.MethodGet,
 		"/api/v1/snapshot/raw",
+		"",
 		nil,
 	)
 
@@ -236,6 +240,7 @@ func (f *fakeSSHExec) exec(
 ) ([]byte, []byte, int, error) {
 	// argv ends with: sh -lc '<PATH=...; kenn-forge api -i [-d @-] METHOD PATH'
 	fragment := argv[len(argv)-1]
+	f.fragments = append(f.fragments, fragment)
 	fields := strings.Fields(fragment)
 	trim := func(v string) string {
 		return strings.Trim(v, `'\`)
@@ -251,6 +256,47 @@ func (f *fakeSSHExec) exec(
 			nil, 1, nil
 	}
 	return []byte(framed), nil, 0, nil
+}
+
+func TestSSHFleetProxyRelaysTerminalPasteImageAtLimit(t *testing.T) {
+	require := require.New(t)
+	assert := assert.New(t)
+	imageBytes := make([]byte, terminalpaste.MaxImageBytes)
+	copy(imageBytes, []byte("\x89PNG\r\n\x1a\n"))
+	fake := &fakeSSHExec{routes: map[string]string{
+		"POST /api/v1/terminal/paste-image": framedJSON(
+			http.StatusCreated,
+			`{"path":"/var/lib/forge/paste-image.png"}`,
+		),
+	}}
+	srv, _ := setupTestServer(t)
+	setTestFleetConfig(srv, func(cfg *config.Config) {
+		cfg.Fleet.Enabled = true
+	})
+	srv.sshFleet = newSSHTestTransport(t, fake, config.FleetSSHPeer{
+		Key: "member", Destination: "dev@host-a.example",
+	})
+	ts := httptest.NewServer(srv.localHandler())
+	t.Cleanup(ts.Close)
+	req, err := http.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		ts.URL+"/api/v1/fleet/hosts/member/terminal/paste-image",
+		bytes.NewReader(imageBytes),
+	)
+	require.NoError(err)
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	resp, err := ts.Client().Do(req)
+	require.NoError(err)
+	defer resp.Body.Close()
+
+	assert.Equal(http.StatusCreated, resp.StatusCode)
+	require.Len(fake.bodies, 1)
+	assert.Equal(imageBytes, fake.bodies[0])
+	require.Len(fake.fragments, 1)
+	assert.Contains(fake.fragments[0], "--content-type")
+	assert.Contains(fake.fragments[0], "application/octet-stream")
 }
 
 func newSSHTestTransport(
