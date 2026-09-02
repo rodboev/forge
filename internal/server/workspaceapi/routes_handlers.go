@@ -1922,16 +1922,8 @@ func (s *Handler) applyAgentActivity(
 	if s.agentActivity == nil || s.runtime == nil || resp == nil || summary == nil {
 		return
 	}
-	liveSessionKeys := make([]string, 0)
-	for _, session := range s.runtime.ListSessions(summary.ID) {
-		if session.Kind == localruntime.LaunchTargetAgent &&
-			(session.Status == localruntime.SessionStatusRunning ||
-				session.Status == localruntime.SessionStatusStarting) {
-			liveSessionKeys = append(liveSessionKeys, session.Key)
-		}
-	}
 	snapshot, ok := s.agentActivity.SnapshotForWorkspace(
-		summary.WorktreePath, liveSessionKeys,
+		summary.WorktreePath, s.liveAgentSessionKeys(summary.ID),
 	)
 	if !ok {
 		return
@@ -1969,20 +1961,14 @@ func (s *Handler) workspaceResponseWithEnrichment(
 	divergenceErr := applyWorktreeDivergence(ctx, &resp, summary.WorktreePath)
 	dirtyErr := applyWorktreeDirty(ctx, &resp, summary.WorktreePath)
 	gitStateErr := errors.Join(divergenceErr, dirtyErr)
-	sessions, sessionsErr := s.workspaceTmuxActivitySessions(ctx, summary)
-	activity, hasActivity, activityErr := s.probeWorkspaceTmuxActivity(
-		ctx, summary, sessions,
-	)
-	if hasActivity {
-		applyTmuxActivity(&resp, activity)
-	}
-	err := errors.Join(gitStateErr, sessionsErr, activityErr)
+	tmuxErr := s.applyWorkspaceTmuxEnrichment(ctx, summary, &resp)
+	err := errors.Join(gitStateErr, tmuxErr)
 	result := workspaceEnrichmentProbeResult{
 		response:           resp,
 		divergenceComplete: gitStateErr == nil,
-		tmuxComplete:       sessionsErr == nil && activityErr == nil,
+		tmuxComplete:       tmuxErr == nil,
 		divergenceErr:      gitStateErr,
-		tmuxErr:            errors.Join(sessionsErr, activityErr),
+		tmuxErr:            tmuxErr,
 		err:                err,
 	}
 	if err != nil {
@@ -2010,16 +1996,60 @@ func (s *Handler) workspaceResponseWithTmuxEnrichment(
 	if s.workspaces == nil || summary.Status != "ready" {
 		return workspaceEnrichmentProbeResult{response: resp, kind: workspaceEnrichmentTmux}
 	}
-	sessions, sessionsErr := s.workspaceTmuxActivitySessions(ctx, summary)
-	activity, hasActivity, activityErr := s.probeWorkspaceTmuxActivity(ctx, summary, sessions)
-	if hasActivity {
-		applyTmuxActivity(&resp, activity)
-	}
-	err := errors.Join(sessionsErr, activityErr)
+	err := s.applyWorkspaceTmuxEnrichment(ctx, summary, &resp)
 	return workspaceEnrichmentProbeResult{
 		response: resp, tmuxComplete: err == nil, tmuxErr: err, err: err,
 		kind: workspaceEnrichmentTmux,
 	}
+}
+
+// applyWorkspaceTmuxEnrichment fills the tmux activity fields of resp from a
+// pane probe. A workspace whose live agent session has reported through the
+// hook integration is not probed at all: the lifecycle events are the
+// authoritative activity signal there, and the pane capture would only spend
+// tmux spawns to second-guess them. Such a workspace counts as a complete,
+// activity-free tmux sample.
+func (s *Handler) applyWorkspaceTmuxEnrichment(
+	ctx context.Context,
+	summary *db.WorkspaceSummary,
+	resp *workspaceResponse,
+) error {
+	if s.hookActivityCoversWorkspace(summary) {
+		return nil
+	}
+	sessions, sessionsErr := s.workspaceTmuxActivitySessions(ctx, summary)
+	activity, hasActivity, activityErr := s.probeWorkspaceTmuxActivity(ctx, summary, sessions)
+	if hasActivity {
+		applyTmuxActivity(resp, activity)
+	}
+	return errors.Join(sessionsErr, activityErr)
+}
+
+// hookActivityCoversWorkspace reports whether a fresh hook report exists for
+// one of the workspace's live agent sessions.
+func (s *Handler) hookActivityCoversWorkspace(summary *db.WorkspaceSummary) bool {
+	if s.agentActivity == nil || s.runtime == nil || summary == nil {
+		return false
+	}
+	_, ok := s.agentActivity.SnapshotForWorkspace(
+		summary.WorktreePath, s.liveAgentSessionKeys(summary.ID),
+	)
+	return ok
+}
+
+// liveAgentSessionKeys lists the runtime session keys of the workspace's
+// running or starting agent sessions, the only sessions whose hook reports
+// count.
+func (s *Handler) liveAgentSessionKeys(workspaceID string) []string {
+	liveSessionKeys := make([]string, 0)
+	for _, session := range s.runtime.ListSessions(workspaceID) {
+		if session.Kind == localruntime.LaunchTargetAgent &&
+			(session.Status == localruntime.SessionStatusRunning ||
+				session.Status == localruntime.SessionStatusStarting) {
+			liveSessionKeys = append(liveSessionKeys, session.Key)
+		}
+	}
+	return liveSessionKeys
 }
 
 func (s *Handler) workspaceTmuxActivitySessions(
