@@ -10,7 +10,7 @@ permissions:
   issues: read
   pull-requests: read
   statuses: read
-# Timing baseline sample 2 of 5.
+# Timing baseline sample 3 of 5.
 env:
   PROBE_DURATION: "0s"
 jobs:
