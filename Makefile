@@ -393,7 +393,7 @@ lint: ensure-embed-dir check-mise
 
 # Check Go lint without mutating files; used by CI and pre-push.
 lint-check: ensure-embed-dir check-mise
-	mise exec github:jdx/jactionlint@2.3.0 -- jactionlint --profile correctness --no-online --shellcheck= --pyflakes= .github/workflows/ci.yml .github/workflows/ci-pr.yml
+	mise exec -- golangci-lint run
 
 # Run NilAway against first-party Go packages
 nilaway: ensure-embed-dir

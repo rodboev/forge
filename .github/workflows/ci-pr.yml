@@ -1,13 +1,12 @@
 name: CI
 
-# Run the workflow from the same commit so PR checks exercise workflow changes.
+# The PR dispatcher always calls the main-pinned workflow. That workflow
+# independently routes same-repository Linux jobs to the managed public fleet
+# and fork jobs to GitHub-hosted runners.
 on:
   pull_request:
-  merge_group:
-    types: [checks_requested]
 
 permissions:
-  actions: read
   checks: write
   contents: read
   issues: read
@@ -17,15 +16,4 @@ permissions:
 
 jobs:
   run:
-    uses: ./.github/workflows/ci.yml
-
-  gate:
-    name: CI gate
-    needs: run
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require CI success
-        env:
-          CI_RESULT: ${{ needs.run.result }}
-        run: test "$CI_RESULT" = success
+    uses: kenn-io/forge/.github/workflows/ci.yml@main
